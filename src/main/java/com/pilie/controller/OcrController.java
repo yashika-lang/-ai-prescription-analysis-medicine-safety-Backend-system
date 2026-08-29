@@ -1,19 +1,30 @@
 package com.pilie.controller;
 
+import com.pilie.model.Ingredient;
 import com.pilie.model.Medicine;
+import com.pilie.model.PrescriptionExtraction;
 import com.pilie.model.User;
+import com.pilie.repository.AllergenRepository;
+import com.pilie.repository.IngredientRepository;
 import com.pilie.repository.MedicineRepository;
+import com.pilie.repository.PrescriptionExtractionRepository;
 import com.pilie.repository.UserRepository;
 import com.pilie.service.AllergyChecker;
 import com.pilie.service.DosageExtractor;
 import com.pilie.service.HindiTranslator;
-import com.pilie.service.WikiUsageFetcher;
 import com.pilie.service.IngredientInjector;
+import com.pilie.service.TesseractOcrService;
+import com.pilie.service.WikiUsageFetcher;
 
+import net.sourceforge.tess4j.TesseractException;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.util.*;
 
 @RestController
@@ -27,6 +38,15 @@ public class OcrController {
     private UserRepository userRepository;
 
     @Autowired
+    private IngredientRepository ingredientRepository;
+
+    @Autowired
+    private AllergenRepository allergenRepository;
+
+    @Autowired
+    private PrescriptionExtractionRepository prescriptionExtractionRepository;
+
+    @Autowired
     private WikiUsageFetcher wikiUsageFetcher;
 
     @Autowired
@@ -37,6 +57,9 @@ public class OcrController {
 
     @Autowired
     private IngredientInjector ingredientInjector;
+
+    @Autowired
+    private TesseractOcrService tesseractOcrService;
 
     // Helper method for safe Hindi translation with fallback to original text
     private String safeTranslate(String text) {
@@ -57,7 +80,43 @@ public class OcrController {
     public List<Map<String, Object>> analyzePrescription(
             @RequestParam String text,
             @RequestParam String email) {
+        return processExtractedText(text, email);
+    }
 
+    /**
+     * Real OCR entry point: accepts an uploaded prescription image, runs it through
+     * Tesseract (Tess4J) to get raw text, then feeds that text through the exact same
+     * extraction -> ingredient lookup -> allergy cross-check pipeline as the text-based
+     * endpoint above, so there is only one place the safety logic lives.
+     */
+    @Transactional
+    @PostMapping(value = "/upload-prescription", consumes = "multipart/form-data")
+    public ResponseEntity<?> uploadPrescription(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam String email) {
+        String extractedText;
+        try {
+            extractedText = tesseractOcrService.extractText(file);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (IOException | TesseractException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "OCR processing failed: " + e.getMessage()));
+        }
+
+        if (extractedText == null || extractedText.isBlank()) {
+            return ResponseEntity.unprocessableEntity()
+                    .body(Map.of("error", "No readable text found in the uploaded image."));
+        }
+
+        List<Map<String, Object>> result = processExtractedText(extractedText, email);
+        Map<String, Object> response = new HashMap<>();
+        response.put("rawOcrText", extractedText);
+        response.put("medicines", result);
+        return ResponseEntity.ok(response);
+    }
+
+    private List<Map<String, Object>> processExtractedText(String text, String email) {
         List<Map<String, Object>> response = new ArrayList<>();
 
         // Fetch user by email
@@ -69,16 +128,18 @@ public class OcrController {
         for (Map<String, String> medMap : extractedData) {
             String medName = medMap.getOrDefault("name", "Unknown");
 
-            // Try to find medicine in DB or create new one
-            Optional<Medicine> existingMedOpt = medicineRepository.findByNameIgnoreCase(medName);
+            // Try to find medicine in DB or create new one. Multiple rows can share a
+            // name (different manufacturers), so just take the first match.
+            List<Medicine> existingMeds = medicineRepository.findByNameIgnoreCase(medName);
             Medicine medicine;
-            if (existingMedOpt.isPresent()) {
-                medicine = existingMedOpt.get();
+            if (!existingMeds.isEmpty()) {
+                medicine = existingMeds.get(0);
             } else {
                 medicine = new Medicine();
                 medicine.setName(medName);
                 // Ingredients from manual injector or fallback
-                medicine.setIngredients(ingredientInjector.getManualIngredients(medName));
+                String ingredientsRaw = ingredientInjector.getManualIngredients(medName);
+                medicine.setIngredients(ingredientsRaw);
                 medicine.setManufacturer("N/A");
 
                 // Get usage and translate to Hindi
@@ -88,6 +149,8 @@ public class OcrController {
                 medicine.setUsage(usageEng);
                 medicine.setUsageHindi(usageHi);
 
+                linkNormalizedIngredients(medicine, ingredientsRaw);
+
                 medicineRepository.save(medicine);
             }
 
@@ -96,8 +159,9 @@ public class OcrController {
             String timingHi = safeTranslate(medMap.getOrDefault("timing", ""));
             String durationHi = safeTranslate(medMap.getOrDefault("duration", ""));
 
-            // Detect allergens in ingredients
-            List<Map<String, String>> allergensFound = allergyChecker.checkForAllergens(medicine.getIngredients());
+            // Detect allergens via the normalized Ingredient -> Allergen relations,
+            // falling back to the legacy string match when nothing has been linked yet.
+            List<Map<String, String>> allergensFound = allergyChecker.checkForAllergensNormalized(medicine);
 
             List<String> allergenNames = new ArrayList<>();
             for (Map<String, String> allergenInfo : allergensFound) {
@@ -125,7 +189,8 @@ public class OcrController {
                 riskMessage = "✅ No major allergens found in this medicine.";
             }
 
-            // Auto-save new allergens to user allergy profile
+            // Auto-save new allergens to user allergy profile (both legacy string list
+            // and the normalized Allergen relation, kept in sync)
             if (user != null && !allergenNames.isEmpty()) {
                 List<String> currentAllergies = user.getAllergies();
                 if (currentAllergies == null) {
@@ -143,9 +208,20 @@ public class OcrController {
                         modified = true;
                     }
                 }
+                boolean allergenProfileChanged = false;
+                for (String allergen : allergenNames) {
+                    com.pilie.model.Allergen allergenEntity = allergenRepository.findByNameIgnoreCase(allergen)
+                            .orElseGet(() -> allergenRepository.save(new com.pilie.model.Allergen(allergen.toLowerCase(), "unknown")));
+                    if (user.getAllergenProfile().add(allergenEntity)) {
+                        allergenProfileChanged = true;
+                    }
+                }
+
                 if (modified) {
                     List<String> updatedAllergies = new ArrayList<>(allergySet);
                     user.setAllergies(updatedAllergies);
+                }
+                if (modified || allergenProfileChanged) {
                     userRepository.save(user);
                 }
             }
@@ -169,9 +245,33 @@ public class OcrController {
             // nearbyClinics removed from here as per request
 
             response.add(medInfo);
+
+            if (email != null && !email.isBlank()) {
+                PrescriptionExtraction record = new PrescriptionExtraction();
+                record.setUserEmail(email);
+                record.setMedicineName(medName);
+                record.setIngredients(medicine.getIngredients());
+                record.setQuantity(medMap.getOrDefault("quantity", "Not found"));
+                record.setTiming(medMap.getOrDefault("timing", "Not found"));
+                record.setDuration(medMap.getOrDefault("duration", "Not found"));
+                record.setRiskMessage(riskMessage);
+                prescriptionExtractionRepository.save(record);
+            }
         }
 
         return response;
     }
 
+    private void linkNormalizedIngredients(Medicine medicine, String rawIngredients) {
+        if (rawIngredients == null || rawIngredients.isBlank() || rawIngredients.equalsIgnoreCase("N/A")) {
+            return;
+        }
+        for (String token : rawIngredients.split("[+,]")) {
+            String name = token.trim();
+            if (name.isEmpty()) continue;
+            Ingredient ingredient = ingredientRepository.findByNameIgnoreCase(name)
+                    .orElseGet(() -> ingredientRepository.save(new Ingredient(name)));
+            medicine.getIngredientSet().add(ingredient);
+        }
+    }
 }

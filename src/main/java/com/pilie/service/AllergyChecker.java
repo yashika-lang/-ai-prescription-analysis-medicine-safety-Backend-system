@@ -1,5 +1,7 @@
 package com.pilie.service;
 
+import com.pilie.model.Allergen;
+import com.pilie.model.Medicine;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
@@ -40,6 +42,35 @@ public class AllergyChecker {
                 allergenInfo.put("name", allergen);
                 allergenInfo.put("risk", risk);
                 foundAllergens.add(allergenInfo);
+            }
+        }
+        return foundAllergens;
+    }
+
+    /**
+     * Normalized check: walks the medicine's linked Ingredient -> Allergen relations
+     * built by the schema migration/seed step instead of regex-matching a free-text
+     * ingredients string. Falls back to {@link #checkForAllergens(String)} when the
+     * medicine has no normalized ingredient links yet (e.g. not migrated/seeded).
+     */
+    public List<Map<String, String>> checkForAllergensNormalized(Medicine medicine) {
+        if (medicine == null) return new ArrayList<>();
+
+        if (medicine.getIngredientSet() == null || medicine.getIngredientSet().isEmpty()) {
+            return checkForAllergens(medicine.getIngredients());
+        }
+
+        List<Map<String, String>> foundAllergens = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        for (var ingredient : medicine.getIngredientSet()) {
+            for (Allergen allergen : ingredient.getAllergens()) {
+                String name = allergen.getName().toLowerCase();
+                if (seen.add(name)) {
+                    Map<String, String> allergenInfo = new HashMap<>();
+                    allergenInfo.put("name", name);
+                    allergenInfo.put("risk", allergen.getRiskLevel() != null ? allergen.getRiskLevel() : "unknown");
+                    foundAllergens.add(allergenInfo);
+                }
             }
         }
         return foundAllergens;

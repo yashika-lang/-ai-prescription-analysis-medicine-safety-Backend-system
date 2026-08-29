@@ -1,8 +1,11 @@
 package com.pilie.controller;
 
+import com.pilie.model.Allergen;
 import com.pilie.model.User;
+import com.pilie.repository.AllergenRepository;
 import com.pilie.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
@@ -21,9 +24,23 @@ public class UserController {
     @Autowired
     private UserRepository userRepository;
 
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+
+    @Autowired
+    private AllergenRepository allergenRepository;
+
+    private Allergen findOrCreateAllergen(String name) {
+        return allergenRepository.findByNameIgnoreCase(name)
+                .orElseGet(() -> allergenRepository.save(new Allergen(name.toLowerCase(), "unknown")));
+    }
+
     // 🟢 Register new user
     @PostMapping("/register")
     public ResponseEntity<?> registerUser(@RequestBody User user) {
+        if (user.getPassword() != null && !user.getPassword().isBlank()) {
+            user.setPassword(passwordEncoder.encode(user.getPassword()));
+        }
         User savedUser = userRepository.save(user);
 
         Map<String, Object> response = new HashMap<>();
@@ -71,9 +88,20 @@ public String addAllergies(@RequestParam String email, @RequestBody List<String>
         }
     }
 
+    boolean profileChanged = false;
+    for (String allergen : allergens) {
+        if (user.getAllergenProfile().add(findOrCreateAllergen(allergen))) {
+            profileChanged = true;
+        }
+    }
+
     if (modified) {
         user.setAllergies(new ArrayList<>(allergySet));
+    }
+    if (modified || profileChanged) {
         userRepository.save(user);
+    }
+    if (modified) {
         return "✅ Allergies added: " + allergens;
     } else {
         return "⚠️ No new allergies added.";
@@ -91,11 +119,14 @@ public String addAllergies(@RequestParam String email, @RequestBody List<String>
         }
 
         List<String> allergies = user.getAllergies();
+        boolean profileChanged = user.getAllergenProfile().add(findOrCreateAllergen(allergy));
         if (!allergies.contains(allergy)) {
             allergies.add(allergy);
             user.setAllergies(allergies);
             userRepository.save(user);
             return "✅ Allergy added to profile: " + allergy;
+        } else if (profileChanged) {
+            userRepository.save(user);
         }
 
         return "⚠️ Allergy already exists in profile.";
@@ -113,7 +144,7 @@ public String addAllergies(@RequestParam String email, @RequestBody List<String>
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body("❌ User not found");
         }
 
-        if (!user.getPassword().equals(password)) {
+        if (!passwordEncoder.matches(password, user.getPassword())) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("❌ Invalid password");
         }
 

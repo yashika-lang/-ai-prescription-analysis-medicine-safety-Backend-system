@@ -1,10 +1,8 @@
 package com.pilie.model;
 
-import jakarta.persistence.Entity;
-import jakarta.persistence.Id;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Column;
+import jakarta.persistence.*;
+import java.util.HashSet;
+import java.util.Set;
 
 @Entity
 public class Medicine {
@@ -22,6 +20,16 @@ public class Medicine {
 
     @Column(name = "usage_hindi", columnDefinition = "TEXT") // 🔥 New column for Hindi
     private String usageHindi;
+
+    // Normalized ingredient links (in addition to the legacy free-text "ingredients" field above,
+    // which is kept so existing reads/writes keep working unchanged).
+    @ManyToMany
+    @JoinTable(
+        name = "medicine_ingredient",
+        joinColumns = @JoinColumn(name = "medicine_id"),
+        inverseJoinColumns = @JoinColumn(name = "ingredient_id")
+    )
+    private Set<Ingredient> ingredientSet = new HashSet<>();
 
     // Constructor(s)
     public Medicine() {}
@@ -53,4 +61,7 @@ public class Medicine {
 
     public String getUsageHindi() { return usageHindi; }
     public void setUsageHindi(String usageHindi) { this.usageHindi = usageHindi; }
+
+    public Set<Ingredient> getIngredientSet() { return ingredientSet; }
+    public void setIngredientSet(Set<Ingredient> ingredientSet) { this.ingredientSet = ingredientSet; }
 }

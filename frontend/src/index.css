@@ -1,0 +1,66 @@
+@import "tailwindcss";
+
+@theme {
+  /* Brand palette — restrained, no generic healthcare blue.
+     Ink for text/dark surfaces, warm paper for background,
+     pine green as the single trust/brand accent, brick red
+     reserved ONLY for allergy/danger states so it stays meaningful. */
+  --color-ink: #10151a;
+  --color-ink-soft: #2b333b;
+  --color-paper: #f8f6f1;
+  --color-paper-dim: #efece4;
+  --color-line: #e3ded2;
+  --color-brand: #1f6f5c;
+  --color-brand-dark: #163f35;
+  --color-brand-soft: #e7efe9;
+  --color-alert: #b23a2e;
+  --color-alert-soft: #f7e7e4;
+
+  --font-display: "Fraunces", "Iowan Old Style", serif;
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+
+  --animate-drift: drift 7s ease-in-out infinite;
+  --animate-scan: scan 2.8s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+}
+
+@keyframes drift {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+
+@keyframes scan {
+  0% { transform: translateY(-6%); opacity: 0; }
+  8% { opacity: 1; }
+  92% { opacity: 1; }
+  100% { transform: translateY(106%); opacity: 0; }
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background-color: var(--color-paper);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection {
+    background: var(--color-brand);
+    color: var(--color-paper);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

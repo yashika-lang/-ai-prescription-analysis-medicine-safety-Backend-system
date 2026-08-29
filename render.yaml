@@ -1,0 +1,37 @@
+databases:
+  - name: pillie-db
+    databaseName: pillie_db
+    plan: free
+
+services:
+  - type: web
+    name: pillie-backend
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /test
+    envVars:
+      - key: DB_HOST
+        fromDatabase:
+          name: pillie-db
+          property: host
+      - key: DB_PORT
+        fromDatabase:
+          name: pillie-db
+          property: port
+      - key: DB_NAME
+        fromDatabase:
+          name: pillie-db
+          property: database
+      - key: DB_USERNAME
+        fromDatabase:
+          name: pillie-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: pillie-db
+          property: password
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false # set to your Vercel frontend URL after it's deployed
+      - key: OPENAI_API_KEY
+        sync: false # set in the Render dashboard - never committed to git

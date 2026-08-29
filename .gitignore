@@ -31,3 +31,13 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### macOS ###
+.DS_Store
+
+### Secrets - never commit ###
+application-local.properties
+src/main/resources/application-local.properties
+.env
+.env.*
+!.env.example

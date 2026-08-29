@@ -1,5 +1,7 @@
 package com.pilie.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.NotNull;
 import java.util.*;
@@ -29,6 +31,16 @@ public class User {
     @Column(name = "allergy")
     private List<String> allergies;
 
+    // Normalized allergy profile (kept alongside the legacy free-text list above,
+    // which existing endpoints continue to read/write unchanged).
+    @ManyToMany(fetch = FetchType.EAGER)
+    @JoinTable(
+        name = "user_allergen",
+        joinColumns = @JoinColumn(name = "user_id"),
+        inverseJoinColumns = @JoinColumn(name = "allergen_id")
+    )
+    private Set<Allergen> allergenProfile = new HashSet<>();
+
     // ✅ Constructors
     public User() {
         this.allergies = new ArrayList<>();
@@ -53,10 +65,16 @@ public class User {
         this.name = name;
     }
 
+    @JsonIgnore
     public String getPassword() {
         return password;
     }
 
+    // @JsonIgnore on the getter alone hides this property from BOTH serialization and
+    // deserialization once Jackson merges the getter/setter into one property definition -
+    // this forces the setter to stay writable so incoming register/login request bodies
+    // still populate the password, while the getter keeps it out of every JSON response.
+    @JsonProperty("password")
     public void setPassword(String password) {
         this.password = password;
     }
@@ -102,5 +120,16 @@ public class User {
 
     public void setAllergies(List<String> allergies) {
         this.allergies = allergies != null ? allergies : new ArrayList<>();
+    }
+
+    public Set<Allergen> getAllergenProfile() {
+        if (this.allergenProfile == null) {
+            this.allergenProfile = new HashSet<>();
+        }
+        return allergenProfile;
+    }
+
+    public void setAllergenProfile(Set<Allergen> allergenProfile) {
+        this.allergenProfile = allergenProfile != null ? allergenProfile : new HashSet<>();
     }
 }
