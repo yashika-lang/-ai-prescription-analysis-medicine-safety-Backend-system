@@ -64,7 +64,16 @@ public class DosageExtractor {
         for (String line : lines) {
             line = line.trim();
             if (line.isEmpty()) continue;
-            result.add(extractDosageInfo(line));
+
+            Map<String, String> dosageInfo = extractDosageInfo(line);
+            // Skip lines with no recognizable dosage signal at all (e.g. OCR noise from a
+            // hospital letterhead, doctor's name, or garbled handwriting) - only surface a
+            // "medicine" when we actually found a name or a quantity to back it up.
+            boolean hasName = !"Unknown".equals(dosageInfo.get("name"));
+            boolean hasQuantity = !"Not found".equals(dosageInfo.get("quantity"));
+            if (hasName || hasQuantity) {
+                result.add(dosageInfo);
+            }
         }
         return result;
     }

@@ -46,7 +46,10 @@ public class SecurityConfig {
             .csrf(csrf -> csrf.disable())
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/test", "/api/user/register", "/api/user/login").permitAll()
+                // "/error" must be permitted too: Spring Boot internally forwards any unhandled
+                // exception to it, and without this, Spring Security intercepts that forward and
+                // masks the real error behind a misleading 401 instead of the actual status.
+                .requestMatchers("/test", "/api/user/register", "/api/user/login", "/error").permitAll()
                 .anyRequest().authenticated()
             )
             .httpBasic(basic -> {});

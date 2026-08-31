@@ -7,7 +7,6 @@ import Button from "../components/ui/Button";
 import Alert from "../components/ui/Alert";
 import Spinner from "../components/ui/Spinner";
 import { useAuth } from "../context/AuthContext";
-import { ApiError } from "../services/apiClient";
 
 const initialForm = { name: "", email: "", password: "", age: "", gender: "", illnesses: "" };
 
@@ -38,11 +37,7 @@ export default function Register() {
       });
       navigate("/dashboard", { replace: true });
     } catch (err) {
-      if (err instanceof ApiError && err.status >= 500) {
-        setError("Could not create your account — that email may already be registered.");
-      } else {
-        setError(err.message || "Something went wrong. Please try again.");
-      }
+      setError(err.message || "Something went wrong. Please try again.");
     } finally {
       setLoading(false);
     }

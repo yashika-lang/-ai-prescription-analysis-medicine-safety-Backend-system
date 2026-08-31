@@ -8,6 +8,8 @@ import org.springframework.web.multipart.MultipartFile;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
+import java.awt.image.ColorConvertOp;
+import java.awt.color.ColorSpace;
 import java.io.IOException;
 import java.io.InputStream;
 
@@ -41,7 +43,20 @@ public class TesseractOcrService {
             if (image == null) {
                 throw new IllegalArgumentException("Uploaded file is not a readable image.");
             }
-            return tesseract.doOCR(image);
+            return tesseract.doOCR(toGrayscale(image));
         }
+    }
+
+    /**
+     * Converting to grayscale before OCR is a standard, low-risk preprocessing step that
+     * measurably helps Tesseract on real photographed documents (uneven lighting, colored
+     * pen/stamp ink, phone camera noise). It does NOT make Tesseract able to read cursive
+     * handwriting - that's a fundamental limitation of Tesseract itself (trained for printed
+     * text), not something preprocessing or tuning can fix.
+     */
+    private BufferedImage toGrayscale(BufferedImage source) {
+        BufferedImage grayscale = new BufferedImage(source.getWidth(), source.getHeight(), BufferedImage.TYPE_BYTE_GRAY);
+        new ColorConvertOp(ColorSpace.getInstance(ColorSpace.CS_GRAY), null).filter(source, grayscale);
+        return grayscale;
     }
 }
