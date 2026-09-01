@@ -16,7 +16,6 @@ import com.pilie.service.IngredientInjector;
 import com.pilie.service.TesseractOcrService;
 import com.pilie.service.WikiUsageFetcher;
 
-import net.sourceforge.tess4j.TesseractException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -99,7 +98,7 @@ public class OcrController {
             extractedText = tesseractOcrService.extractText(file);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
-        } catch (IOException | TesseractException e) {
+        } catch (IOException e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("error", "OCR processing failed: " + e.getMessage()));
         }

@@ -1,49 +1,75 @@
 package com.pilie.service;
 
-import net.sourceforge.tess4j.Tesseract;
-import net.sourceforge.tess4j.TesseractException;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import javax.imageio.ImageIO;
+import java.awt.color.ColorSpace;
 import java.awt.image.BufferedImage;
 import java.awt.image.ColorConvertOp;
-import java.awt.color.ColorSpace;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.concurrent.TimeUnit;
 
 /**
- * Wraps Tess4J (JNA binding to the system-installed libtesseract) to run real OCR
- * over an uploaded prescription image and return the raw recognized text.
+ * Runs real OCR by shelling out to the system-installed `tesseract` CLI binary,
+ * rather than going through Tess4J's JNA bindings.
+ *
+ * Tess4J's JNA layer (via lept4j) eagerly resolves every native function it declares
+ * against the system's Leptonica library, and distro-packaged Leptonica (apt, across
+ * multiple Ubuntu versions) is missing an internal symbol (returnErrorFloat1) that
+ * binding expects - a known, recurring lept4j compatibility gap, not something fixed
+ * by choosing a different Tesseract/Leptonica package version. The CLI binary has no
+ * such dependency and works identically via Homebrew (local macOS dev) and apt
+ * (the Linux/Render deployment image).
  */
 @Service
 public class TesseractOcrService {
 
-    private final Tesseract tesseract;
-
-    public TesseractOcrService(@Value("${tesseract.datapath}") String datapath,
-                                @Value("${tesseract.native.libpath}") String nativeLibPath) {
-        if (nativeLibPath != null && !nativeLibPath.isBlank()) {
-            // JNA doesn't search Homebrew's lib dir by default; point it there so it can
-            // dlopen the system-installed libtesseract/libleptonica.
-            System.setProperty("jna.library.path", nativeLibPath);
-        }
-        this.tesseract = new Tesseract();
-        this.tesseract.setDatapath(datapath);
-        this.tesseract.setLanguage("eng");
-    }
-
-    public String extractText(MultipartFile file) throws IOException, TesseractException {
+    public String extractText(MultipartFile file) throws IOException {
         if (file == null || file.isEmpty()) {
             throw new IllegalArgumentException("Uploaded prescription image is empty.");
         }
+
+        BufferedImage image;
         try (InputStream in = file.getInputStream()) {
-            BufferedImage image = ImageIO.read(in);
-            if (image == null) {
-                throw new IllegalArgumentException("Uploaded file is not a readable image.");
+            image = ImageIO.read(in);
+        }
+        if (image == null) {
+            throw new IllegalArgumentException("Uploaded file is not a readable image.");
+        }
+
+        Path inputFile = Files.createTempFile("pillie-ocr-", ".png");
+        Path outputBase = Files.createTempFile("pillie-ocr-out-", "");
+        Path outputFile = Path.of(outputBase + ".txt");
+        try {
+            ImageIO.write(toGrayscale(image), "png", inputFile.toFile());
+
+            Process process = new ProcessBuilder("tesseract", inputFile.toString(), outputBase.toString())
+                    .redirectErrorStream(true)
+                    .start();
+
+            boolean finished = waitFor(process);
+            if (!finished || process.exitValue() != 0) {
+                throw new IOException("Tesseract OCR process failed (is `tesseract` installed and on PATH?).");
             }
-            return tesseract.doOCR(toGrayscale(image));
+
+            return Files.readString(outputFile);
+        } finally {
+            Files.deleteIfExists(inputFile);
+            Files.deleteIfExists(outputBase);
+            Files.deleteIfExists(outputFile);
+        }
+    }
+
+    private boolean waitFor(Process process) throws IOException {
+        try {
+            return process.waitFor(30, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("OCR was interrupted.", e);
         }
     }
 
